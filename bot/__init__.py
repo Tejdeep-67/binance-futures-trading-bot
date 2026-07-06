@@ -1,0 +1,3 @@
+"""
+Binance bot package initialization.
+"""
