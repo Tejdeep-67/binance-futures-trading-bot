@@ -1,9 +1,12 @@
+import functools
 import os
+
+import requests
 from binance.client import Client
 from binance.exceptions import BinanceAPIException, BinanceRequestException
 from dotenv import load_dotenv
 
-from bot.exceptions import APIError, NetworkError
+from bot.exceptions import APIError, NetworkError, TradingBotError
 from bot.logging_config import setup_logger
 
 logger = setup_logger()
@@ -33,15 +36,23 @@ def handle_api_errors(func):
     """
     Decorator to handle Binance API and network exceptions gracefully.
     """
+    @functools.wraps(func)
     def wrapper(*args, **kwargs):
         try:
             return func(*args, **kwargs)
+        except TradingBotError:
+            # already a clean message (e.g. missing keys, bad quantity) - don't hide it
+            raise
         except BinanceAPIException as e:
             logger.error(f"Binance API error: {e.status_code} - {e.message}")
             raise APIError(f"Binance API returned an error: {e.message}")
         except BinanceRequestException as e:
             logger.error(f"Binance Network/Request error: {e}")
             raise NetworkError("A network error occurred while connecting to Binance.")
+        except requests.exceptions.RequestException as e:
+            # timeouts / DNS / connection refused come from requests, not python-binance
+            logger.error(f"Network error: {e}")
+            raise NetworkError("Could not reach the Binance Futures Testnet. Check your internet connection.")
         except Exception as e:
             logger.error(f"Unexpected error in API call: {e}", exc_info=True)
             raise APIError("An unexpected error occurred during the API request.")
