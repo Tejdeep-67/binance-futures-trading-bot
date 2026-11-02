@@ -1,5 +1,6 @@
 import functools
 import os
+import time
 
 import requests
 from binance.client import Client
@@ -10,6 +11,17 @@ from bot.exceptions import APIError, NetworkError, TradingBotError
 from bot.logging_config import setup_logger
 
 logger = setup_logger()
+
+def sync_time(client: Client) -> None:
+    """
+    Signed requests fail with -1021 (timestamp outside recvWindow) when the PC
+    clock is a few seconds off, which happens a lot on Windows. So ask the
+    futures server for its time once and let python-binance apply the offset.
+    """
+    server_time = client.futures_time()["serverTime"]
+    client.timestamp_offset = server_time - int(time.time() * 1000)
+    logger.debug(f"Clock offset vs Binance futures server: {client.timestamp_offset} ms")
+
 
 def get_binance_client() -> Client:
     """
@@ -26,8 +38,13 @@ def get_binance_client() -> Client:
         raise APIError("BINANCE_API_KEY and BINANCE_SECRET_KEY must be set in .env file.")
 
     try:
-        client = Client(api_key, api_secret, testnet=True)
+        # ping=False: the default ping goes to the *spot* testnet, which we don't use
+        client = Client(api_key, api_secret, testnet=True, ping=False)
+        sync_time(client)
         return client
+    except requests.exceptions.RequestException as e:
+        logger.error(f"Could not reach Binance Futures Testnet: {e}")
+        raise NetworkError("Could not reach the Binance Futures Testnet. Check your internet connection.")
     except Exception as e:
         logger.error(f"Failed to initialize Binance client: {e}", exc_info=True)
         raise APIError("Failed to initialize Binance client. Check credentials and connection.")
