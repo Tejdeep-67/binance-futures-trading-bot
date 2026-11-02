@@ -1,4 +1,6 @@
+import re
 from typing import Optional
+
 from bot.exceptions import ValidationError
 from bot.logging_config import setup_logger
 
@@ -12,6 +14,11 @@ def validate_order_input(symbol: str, side: str, order_type: str, quantity: floa
     if not symbol or not isinstance(symbol, str) or symbol.strip() == "":
         logger.error("Validation failed: Symbol cannot be empty")
         raise ValidationError("Symbol cannot be empty.")
+
+    # USDT-M symbols look like BTCUSDT / ETHUSDT / 1000PEPEUSDT
+    if not re.fullmatch(r"[A-Z0-9]{2,20}USDT", symbol.strip().upper()):
+        logger.error(f"Validation failed: Invalid symbol '{symbol}'")
+        raise ValidationError("Symbol should look like BTCUSDT (USDT-M futures only).")
 
     if side.upper() not in ["BUY", "SELL"]:
         logger.error(f"Validation failed: Invalid side '{side}'")
