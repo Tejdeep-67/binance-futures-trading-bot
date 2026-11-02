@@ -1,131 +1,114 @@
 # Binance Futures Testnet Trading Bot
 
-A professional command-line Python application for interacting with the Binance Futures Testnet (USDT-M Futures). It allows users to place MARKET and LIMIT orders through the Binance API with robust validation, clean architecture, and structured logging.
+A small Python command-line tool that places MARKET and LIMIT orders on the **Binance USDT-M Futures Testnet**. I built it to learn how a real exchange API works: API keys, request signing, exchange trading rules, and handling errors properly. It only talks to the testnet, so no real money is involved.
 
-## Features
+## What it does
 
-- **Order Placement**: Place MARKET and LIMIT orders.
-- **Support for sides**: BUY and SELL.
-- **Robust Validation**: Extensive input validation before hitting the API.
-- **CLI Interface**: Built with Typer and Rich for a colored, professional terminal experience.
-- **Structured Logging**: Logs all actions (startup, requests, responses, and errors) to a rotating file in the `logs` directory without exposing technical stack traces to the user.
-- **Error Handling**: Graceful error handling for API, network, and validation errors.
+- Places MARKET and LIMIT orders, BUY or SELL, on USDT-M futures pairs like BTCUSDT
+- Checks the input before calling the API (symbol format, side, type, quantity, price)
+- Reads the symbol's trading rules from the exchange (tick size, step size, min/max quantity, minimum order value) and rounds the quantity/price so Binance doesn't reject the order with a precision error
+- Syncs with the futures server clock so signed requests don't fail with `-1021 Timestamp outside of recvWindow`
+- Shows clear error messages in the terminal (missing keys, insufficient margin, no internet) and writes the details to `logs/trading_bot.log`
 
-## Project Structure
+## Project structure
 
 ```
-trading_bot/
-├── bot/
-│   ├── __init__.py          # Package initializer
-│   ├── client.py            # API client initialization and request handling
-│   ├── exceptions.py        # Custom exceptions
-│   ├── logging_config.py    # Structured logging setup
-│   ├── orders.py            # Business logic for orders
-│   └── validators.py        # Input validation logic
-├── logs/
-│   └── trading_bot.log      # Application logs
-├── .env.example             # Environment variable template
-├── .gitignore               # Ignored files
-├── cli.py                   # Typer CLI application entry point
-├── requirements.txt         # Project dependencies
-└── README.md                # Project documentation
+bot/
+  client.py          # creates the testnet client, time sync, error handling decorator
+  filters.py         # exchange filters: rounding to step/tick size, min qty, min notional
+  orders.py          # builds the order params and sends the order
+  validators.py      # input checks before any API call
+  exceptions.py      # ValidationError / APIError / NetworkError
+  logging_config.py  # rotating log file in logs/
+tests/               # pytest tests, the Binance client is mocked
+cli.py               # Typer CLI entry point
 ```
 
-## Installation
+## Setup
 
-### Prerequisites
-- Python 3.11+
-- A Binance Testnet account with generated API Keys.
+You need Python 3.10+ and a Futures Testnet account.
 
-### Virtual Environment Setup
+1. Log in at https://testnet.binancefuture.com and create an API key (this is separate from your normal Binance account and from the spot testnet).
+2. Install:
 
-1. Create a virtual environment:
-   ```bash
-   python -m venv venv
-   ```
-2. Activate the virtual environment:
-   - On Windows:
-     ```bash
-     venv\Scripts\activate
-     ```
-   - On macOS/Linux:
-     ```bash
-     source venv/bin/activate
-     ```
-
-### Requirements Installation
-
-Install the required packages using pip:
 ```bash
+python -m venv venv
+source venv/bin/activate        # Windows: venv\Scripts\activate
 pip install -r requirements.txt
 ```
 
-### Environment Variable Configuration
+3. Copy `.env.example` to `.env` and put your testnet keys in it:
 
-1. Copy `.env.example` to `.env`:
-   ```bash
-   cp .env.example .env
-   ```
-2. Open `.env` and fill in your Binance Futures Testnet credentials:
-   ```env
-   BINANCE_API_KEY=your_testnet_api_key_here
-   BINANCE_SECRET_KEY=your_testnet_secret_key_here
-   ```
+```env
+BINANCE_API_KEY=your_testnet_api_key_here
+BINANCE_SECRET_KEY=your_testnet_secret_key_here
+```
 
-## Running Examples
+`.env` is in `.gitignore`, so the keys never get committed.
 
-You can run the application using the CLI entry point `cli.py`.
+## Usage
 
-### Market Order Example
-
-Place a Market Buy order for BTCUSDT:
 ```bash
-python cli.py --symbol BTCUSDT --side BUY --type MARKET --quantity 0.001
+python cli.py --help
+
+# market buy 0.002 BTC
+python cli.py --symbol BTCUSDT --side BUY --type MARKET --quantity 0.002
+
+# limit sell, stays open until filled or cancelled (GTC)
+python cli.py --symbol BTCUSDT --side SELL --type LIMIT --quantity 0.002 --price 120000
+
+# short options work too
+python cli.py -s ETHUSDT -S BUY -t LIMIT -q 0.05 -p 2500
 ```
 
-### Limit Order Example
-
-Place a Limit Sell order for BTCUSDT at a specific price:
-```bash
-python cli.py --symbol BTCUSDT --side SELL --type LIMIT --quantity 0.001 --price 120000
-```
-
-### Expected Output
+Example output for a limit order (your order ID will be different):
 
 ```
-====================================
-ORDER SUMMARY
-====================================
-Symbol     : BTCUSDT
-Side       : BUY
-Type       : MARKET
-Quantity   : 0.001
-====================================
+      ORDER SUMMARY
+┌──────────┬─────────┐
+│   Symbol │ BTCUSDT │
+│     Side │ SELL    │
+│     Type │ LIMIT   │
+│ Quantity │ 0.002   │
+│    Price │ 120000  │
+└──────────┴─────────┘
 Submitting order...
 
 Success!
-Order ID: 123456789
+Order ID: 4071223389
 Status: NEW
-Executed Quantity: 0.0
-Average Price: 0.0
+Quantity Sent: 0.002
+Executed Quantity: 0
 ```
 
-## Logging Information
+Note: Binance has a minimum order value on futures (for BTCUSDT on the testnet it was 50 USDT when I checked), so very small quantities get rejected before the order is sent.
 
-All events are logged in the `logs/trading_bot.log` file.
-Logs capture:
-- Application startup
-- Incoming CLI request and validated inputs
-- API request parameters
-- API responses (Order success, Order ID, etc.)
-- Errors (Network failures, Invalid inputs, API rejections like "Insufficient margin")
+## How a request works
 
-The logger uses a Rotating File Handler to keep log size manageable. Users will not see ugly stack traces in the console; they are recorded in the logs.
+1. `validators.py` checks the arguments.
+2. `client.py` loads the keys from `.env`, creates a python-binance `Client(testnet=True)` and asks the futures server for its time to work out the clock offset.
+3. `filters.py` downloads `exchangeInfo`, finds the symbol and rounds the quantity down to the step size and the price to the tick size. Values are sent as plain strings (Python prints `0.00001` as `1e-05`, which the API doesn't accept).
+4. `orders.py` builds the params (LIMIT orders get `timeInForce=GTC`) and calls `futures_create_order`. python-binance adds the `timestamp` and signs the query string with HMAC-SHA256 using the secret key.
+5. Errors from Binance, the network or my own checks are turned into one of three exceptions and printed as a short message.
 
-## Assumptions
-- The application currently interacts **exclusively** with the Binance Futures Testnet (`testnet.binancefuture.com`).
-- Assumes the trading pair follows standard Binance naming (e.g., `BTCUSDT`).
+## Tests
 
-## Troubleshooting
-- **APIError (Unauthorized/Invalid API Key)**: Double-check your `.env` file credentials. Ensure you created keys on the *Futures Testnet* specifically, not the spot testnet or mainnet.
-- **ValidationError**: Make sure your `quantity` and `price` values are greater than zero, and the `side`/`type` are correctly capitalized (or left to the CLI to auto-capitalize).
+```bash
+pip install -r requirements-dev.txt
+pytest
+```
+
+The tests don't need keys or internet. They mock the Binance client and check the validators, the rounding rules, the order params, the error handling, and that the request sent over HTTP has the right timestamp and HMAC signature.
+
+## Limitations
+
+- Testnet only, and only MARKET and LIMIT orders (no stop orders, no cancelling, no position view yet).
+- One-way position mode is assumed (no `positionSide` for hedge mode).
+- Leverage and margin type are whatever is set on the testnet account.
+- The testnet sometimes resets balances or has thin order books, so fills can look odd.
+
+## Ideas for next
+
+- cancel / list open orders and show positions
+- STOP_MARKET and TAKE_PROFIT orders
+- set leverage from the CLI
