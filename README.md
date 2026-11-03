@@ -112,3 +112,7 @@ The tests don't need keys or internet. They mock the Binance client and check th
 - cancel / list open orders and show positions
 - STOP_MARKET and TAKE_PROFIT orders
 - set leverage from the CLI
+
+## License
+
+MIT, see [LICENSE](LICENSE). This is a learning project for the testnet, not financial advice.
